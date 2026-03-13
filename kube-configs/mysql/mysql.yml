@@ -35,6 +35,8 @@ spec:
         volumeMounts:
         - name: mysql-config
           mountPath: /docker-entrypoint-initdb.d
+        - name: mysql-data
+          mountPath: /var/lib/mysql
         resources:
             requests:
               memory: "256Mi"
@@ -46,6 +48,15 @@ spec:
       - name: mysql-config
         configMap:
           name: mysql-configmap
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-data
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
 ---
 apiVersion: v1
 kind: Service

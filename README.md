@@ -38,6 +38,7 @@ A hands-on Kubernetes learning project using Spring PetClinic — a simple vet c
 | Service (NodePort) | Exposes pods on a fixed port on the node |
 | Ingress | Routes `petclinic.local` HTTP traffic to the app |
 | HPA | Auto-scales the app between 1–3 replicas based on CPU |
+| PersistentVolumeClaim | Stores MySQL data on disk — survives pod restarts |
 
 ---
 
@@ -82,4 +83,20 @@ echo "$(minikube ip) petclinic.local" | sudo tee -a /etc/hosts
 ```
 
 Then open `http://petclinic.local` or `http://$(minikube ip):32000`
+
+---
+
+## Persistent Storage
+
+MySQL data is stored in a PersistentVolumeClaim, it survives pod restarts and rescheduling.
+
+The `volumeClaimTemplates` in `mysql.yml` tells the StatefulSet to automatically provision a 1Gi volume and mount it at `/var/lib/mysql` (MySQL's data directory).
+
+Verify the PVC was created after deploying:
+
+```bash
+kubectl get pvc -n pet-clinic-db
+```
+
+The StatefulSet will recreate the pod and reattach to the same volume automatically.
 
