@@ -39,6 +39,7 @@ A hands-on Kubernetes learning project using Spring PetClinic — a simple vet c
 | Ingress | Routes `petclinic.local` HTTP traffic to the app |
 | HPA | Auto-scales the app between 1–3 replicas based on CPU |
 | PersistentVolumeClaim | Stores MySQL data on disk — survives pod restarts |
+| NetworkPolicy | Restricts MySQL access to only pods from `pet-clinic-app` namespace |
 
 ---
 
@@ -99,4 +100,29 @@ kubectl get pvc -n pet-clinic-db
 ```
 
 The StatefulSet will recreate the pod and reattach to the same volume automatically.
+
+---
+
+## Network Policy
+
+By default any pod in the cluster can reach MySQL on port 3306. The NetworkPolicy in `kube-configs/mysql/network-policy.yml` restricts that to only pods from the `pet-clinic-app` namespace.
+
+Before applying, label the namespaces so the policy can identify them:
+
+```bash
+kubectl label namespace pet-clinic-app name=pet-clinic-app
+kubectl label namespace pet-clinic-db name=pet-clinic-db
+```
+
+Then apply:
+
+```bash
+kubectl apply -f kube-configs/mysql/network-policy.yml
+```
+
+Verify:
+
+```bash
+kubectl get networkpolicy -n pet-clinic-db
+```
 
