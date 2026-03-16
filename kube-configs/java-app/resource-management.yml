@@ -1,0 +1,60 @@
+# ─────────────────────────────────────────────────────────────────
+# LimitRange — pet-clinic-app namespace
+#
+# Enforces per-container resource boundaries so that any pod deployed
+# into this namespace (even without explicit requests/limits) gets
+# safe defaults and cannot exceed the defined maximums.
+# ─────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: app-limit-range
+  namespace: pet-clinic-app
+spec:
+  limits:
+  - type: Container
+    # default: applied to containers that omit the "requests" field
+    default:
+      cpu: "200m"
+      memory: "512Mi"
+    # defaultRequest: applied to containers that omit the "requests" field
+    defaultRequest:
+      cpu: "100m"
+      memory: "256Mi"
+    # max: hard ceiling — a container cannot request more than this
+    max:
+      cpu: "500m"
+      memory: "1Gi"
+    # min: floor — a container cannot request less than this
+    min:
+      cpu: "50m"
+      memory: "64Mi"
+
+---
+# ─────────────────────────────────────────────────────────────────
+# ResourceQuota — pet-clinic-app namespace
+#
+# Caps the TOTAL resources the entire namespace can consume.
+# Accounts for HPA scaling up to 3 replicas:
+#   3 pods × 200m cpu limit  = 600m  → quota: 700m  (headroom)
+#   3 pods × 512Mi mem limit = 1536Mi → quota: 2Gi  (headroom)
+# ─────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: app-resource-quota
+  namespace: pet-clinic-app
+spec:
+  hard:
+    # Compute
+    requests.cpu: "300m"       # 3 pods × 100m request
+    requests.memory: "768Mi"   # 3 pods × 256Mi request
+    limits.cpu: "700m"         # 3 pods × 200m limit + headroom
+    limits.memory: "2Gi"       # 3 pods × 512Mi limit + headroom
+
+    # Object count limits (prevent runaway deployments)
+    pods: "5"
+    services: "3"
+    configmaps: "5"
+    secrets: "5"
+    persistentvolumeclaims: "2"

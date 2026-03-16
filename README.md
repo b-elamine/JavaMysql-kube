@@ -40,6 +40,8 @@ A hands-on Kubernetes learning project using Spring PetClinic — a simple vet c
 | HPA | Auto-scales the app between 1–3 replicas based on CPU |
 | PersistentVolumeClaim | Stores MySQL data on disk — survives pod restarts |
 | NetworkPolicy | Restricts MySQL access to only pods from `pet-clinic-app` namespace |
+| LimitRange | Sets default/min/max CPU & memory per container in a namespace |
+| ResourceQuota | Caps total CPU, memory, and object count for the whole namespace |
 
 ---
 
@@ -72,6 +74,10 @@ kubectl rollout status statefulset/mysql -n pet-clinic-db
 kubectl apply -f kube-configs/java-app/java.yml
 kubectl apply -f kube-configs/java-app/ingress.yml
 kubectl apply -f kube-configs/java-app/hpa.yml
+
+# Resource Management (LimitRange + ResourceQuota)
+kubectl apply -f kube-configs/java-app/resource-management.yml
+kubectl apply -f kube-configs/mysql/resource-management.yml
 ```
 
 ---
@@ -124,5 +130,23 @@ Verify:
 
 ```bash
 kubectl get networkpolicy -n pet-clinic-db
+```
+
+---
+
+## Resource Management
+
+`LimitRange` enforces per-container CPU/memory boundaries. `ResourceQuota` caps the namespace total. Together they prevent runaway resource consumption.
+
+Files: `kube-configs/java-app/resource-management.yml` · `kube-configs/mysql/resource-management.yml`
+
+```bash
+# Check current usage vs quota
+kubectl describe resourcequota app-resource-quota -n pet-clinic-app
+
+# Test LimitRange: deploy a pod without resources — defaults get injected
+kubectl run test-pod --image=nginx -n pet-clinic-app
+kubectl get pod test-pod -n pet-clinic-app -o jsonpath='{.spec.containers[0].resources}'
+kubectl delete pod test-pod -n pet-clinic-app
 ```
 

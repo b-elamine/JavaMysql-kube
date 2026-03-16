@@ -1,0 +1,56 @@
+# ─────────────────────────────────────────────────────────────────
+# LimitRange — pet-clinic-db namespace
+#
+# MySQL is memory-hungry. Defaults are higher than the app namespace
+# to reflect that, while still enforcing a hard ceiling.
+# ─────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: db-limit-range
+  namespace: pet-clinic-db
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "200m"
+      memory: "512Mi"
+    defaultRequest:
+      cpu: "100m"
+      memory: "256Mi"
+    max:
+      cpu: "500m"
+      memory: "1Gi"
+    min:
+      cpu: "50m"
+      memory: "128Mi"
+
+---
+# ─────────────────────────────────────────────────────────────────
+# ResourceQuota — pet-clinic-db namespace
+#
+# MySQL runs as a single StatefulSet replica (no HPA).
+# Storage quota accounts for the 1Gi PVC already in use.
+# ─────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: db-resource-quota
+  namespace: pet-clinic-db
+spec:
+  hard:
+    # Compute
+    requests.cpu: "150m"       # 1 pod × 100m + headroom
+    requests.memory: "512Mi"   # 1 pod × 256Mi + headroom
+    limits.cpu: "400m"         # 1 pod × 200m + headroom
+    limits.memory: "1Gi"       # 1 pod × 512Mi + headroom
+
+    # Storage
+    requests.storage: "2Gi"               # total PVC storage in namespace
+    persistentvolumeclaims: "3"           # max number of PVCs
+
+    # Object count limits
+    pods: "3"
+    services: "2"
+    configmaps: "3"
+    secrets: "3"
