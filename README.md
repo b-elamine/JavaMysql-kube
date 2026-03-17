@@ -45,6 +45,29 @@ A hands-on Kubernetes learning project using Spring PetClinic — a simple vet c
 
 ---
 
+## Docker Image
+
+The image `belamean/kube-java-app:1.0.0` is already built and pushed to Docker Hub. The Deployment pulls it from there automatically — no local build needed to run this project.
+
+**How it was built:**
+
+```bash
+./mvnw package -DskipTests                        # compile the jar
+docker build -t belamean/kube-java-app:1.0.0 .   # build image from dockerfile
+docker push belamean/kube-java-app:1.0.0          # push to Docker Hub
+```
+
+To release a new version after changing the code, bump the tag and update `image:` in `kube-configs/java-app/java.yml`:
+
+```bash
+./mvnw package -DskipTests
+docker build -t belamean/kube-java-app:1.0.1 .
+docker push belamean/kube-java-app:1.0.1
+kubectl apply -f kube-configs/java-app/java.yml
+```
+
+---
+
 ## Prerequisites
 
 ```bash
