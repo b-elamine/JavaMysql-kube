@@ -1,8 +1,8 @@
 # Spring PetClinic on Kubernetes
 
-A hands-on Kubernetes learning project using Spring PetClinic — a simple vet clinic app — as the workload. The focus is on deploying a real Java app on a local Minikube cluster with two nodes.
+A hands-on Kubernetes learning project using Spring PetClinic — a simple vet clinic app — as the workload. The focus is on deploying a real Java app on a local Minikube cluster with three nodes.
 
-**Stack:** Spring Boot 4 · Java 17 · MySQL · Minikube (2 nodes)
+**Stack:** Spring Boot 4 · Java 17 · MySQL · Minikube (3 nodes)
 
 ---
 
@@ -17,13 +17,14 @@ A hands-on Kubernetes learning project using Spring PetClinic — a simple vet c
   Namespace: pet-clinic-app
   ┌─────────────────────────┐
   │  HPA (1–3 pods, 50% CPU)│
-  │  Deployment: java-app   │   → scheduled on any available node
+  │  PDB (min 1 always up)  │
+  │  Deployment: java-app   │   → scheduled on any available worker node
   │  Service: NodePort 32000│
   └────────────┬────────────┘
                │ jdbc (cross-namespace DNS)
   Namespace: pet-clinic-db
   ┌─────────────────────────┐
-  │  StatefulSet: mysql     │   → pinned to minikube-m02 (Node Affinity)
+  │  StatefulSet: mysql     │   → pinned to minikube-m02 (Node Affinity + Taint)
   │  Service: NodePort 30244│
   └─────────────────────────┘
 ```
@@ -32,7 +33,8 @@ A hands-on Kubernetes learning project using Spring PetClinic — a simple vet c
 
 ```
 minikube       → control-plane  (runs ingress controller, cluster components)
-minikube-m02   → worker         (MySQL is pinned here via Node Affinity)
+minikube-m02   → worker         (dedicated DB node — tainted, MySQL pinned here)
+minikube-m03   → worker         (free worker — java-app schedules here)
 ```
 
 | Resource | What it does |
@@ -49,7 +51,9 @@ minikube-m02   → worker         (MySQL is pinned here via Node Affinity)
 | NetworkPolicy | Restricts MySQL access to only pods from `pet-clinic-app` namespace |
 | LimitRange | Sets default/min/max CPU & memory per container in a namespace |
 | ResourceQuota | Caps total CPU, memory, and object count for the whole namespace |
-| Node Affinity | Forces MySQL pod to always run on the worker node (`minikube-m02`) |
+| Node Affinity | Forces MySQL pod to always run on `minikube-m02` |
+| Taint & Toleration | `minikube-m02` rejects all pods except MySQL |
+| PodDisruptionBudget | Guarantees at least 1 java-app pod stays running during maintenance |
 
 ---
 
@@ -79,21 +83,22 @@ kubectl apply -f kube-configs/java-app/java.yml
 ## Prerequisites
 
 ```bash
-# Start Minikube with 2 nodes and Calico CNI
-minikube start --nodes 2 --cni calico --driver kvm2
+# Start Minikube with 3 nodes and Calico CNI
+minikube start --nodes 3 --cni calico --driver kvm2
 
 # Enable required addons (must re-run after every minikube delete)
 minikube addons enable ingress
 minikube addons enable metrics-server
 ```
 
-Verify both nodes are Ready before deploying:
+Verify all nodes are Ready before deploying:
 
 ```bash
 kubectl get nodes
-# NAME           STATUS   ROLES           AGE
+# NAME           STATUS   ROLES
 # minikube       Ready    control-plane
 # minikube-m02   Ready    worker
+# minikube-m03   Ready    worker
 ```
 
 ---
@@ -107,7 +112,10 @@ kubectl create namespace pet-clinic-db
 
 # Label namespaces (required for NetworkPolicy)
 kubectl label namespace pet-clinic-app name=pet-clinic-app
-kubectl label namespace pet-clinic-db name=pet-clinic-db
+kubectl label namespace pet-clinic-db  name=pet-clinic-db
+
+# Taint the DB node so only MySQL can run there
+kubectl taint nodes minikube-m02 dedicated=db:NoSchedule
 
 # Secrets & ConfigMaps
 kubectl apply -f kube-configs/secret.yml
@@ -121,6 +129,7 @@ kubectl rollout status statefulset/mysql -n pet-clinic-db
 kubectl apply -f kube-configs/java-app/java.yml
 kubectl apply -f kube-configs/java-app/ingress.yml
 kubectl apply -f kube-configs/java-app/hpa.yml
+kubectl apply -f kube-configs/java-app/pdb.yml
 
 # Resource Management (LimitRange + ResourceQuota)
 kubectl apply -f kube-configs/java-app/resource-management.yml
@@ -147,7 +156,7 @@ Then open `http://petclinic.local` or `http://$(minikube ip):32000`
 
 ## Node Affinity
 
-MySQL is pinned to the worker node (`minikube-m02`) using Node Affinity. This ensures the DB always runs on a dedicated node, separate from the app.
+MySQL is pinned to `minikube-m02` using Node Affinity. This ensures the DB always runs on a dedicated node, separate from the app.
 
 The affinity block in `kube-configs/mysql/mysql.yml`:
 
@@ -169,6 +178,75 @@ Verify MySQL is on the worker node:
 kubectl get pods -o wide -n pet-clinic-db
 # mysql-0 should show NODE = minikube-m02
 ```
+
+---
+
+## Taints & Tolerations
+
+`minikube-m02` is tainted so only MySQL can run on it. Any pod without the matching toleration is rejected by the node.
+
+Apply the taint:
+
+```bash
+kubectl taint nodes minikube-m02 dedicated=db:NoSchedule
+```
+
+MySQL has a matching toleration in `kube-configs/mysql/mysql.yml`:
+
+```yaml
+tolerations:
+- key: "dedicated"
+  operator: "Equal"
+  value: "db"
+  effect: "NoSchedule"
+```
+
+Verify no other pods land on `minikube-m02`:
+
+```bash
+kubectl get pods -o wide -A | grep minikube-m02
+# only mysql-0 should appear
+```
+
+---
+
+## Pod Disruption Budget (PDB)
+
+PDB guarantees at least 1 java-app pod stays running during voluntary disruptions like node drain or rolling updates. It does not protect against node crashes.
+
+File: `kube-configs/java-app/pdb.yml`
+
+```bash
+kubectl get pdb -n pet-clinic-app
+# ALLOWED DISRUPTIONS = 1 means K8s can evict 1 pod safely
+```
+
+### Safe node drain procedure
+
+Always follow this order to avoid chaos during maintenance:
+
+```bash
+# 1. set HPA min to 1 to prevent panic scaling during the drain
+kubectl patch hpa java-app-hpa -n pet-clinic-app \
+  -p '{"spec":{"minReplicas":1}}'
+
+# 2. drain the node
+kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data --force
+
+# 3. watch pods reschedule cleanly
+kubectl get pods -o wide -n pet-clinic-app --watch
+
+# 4. do your maintenance...
+
+# 5. bring the node back
+kubectl uncordon <node-name>
+
+# 6. restore HPA
+kubectl patch hpa java-app-hpa -n pet-clinic-app \
+  -p '{"spec":{"minReplicas":2}}'
+```
+
+> **Important:** PDB requires at least one free worker node to reschedule the pod. With 3 nodes and one dedicated to MySQL, there is always a free node available during a drain.
 
 ---
 
