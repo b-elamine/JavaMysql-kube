@@ -1,8 +1,8 @@
 # Spring PetClinic on Kubernetes
 
-A hands-on Kubernetes learning project using Spring PetClinic — a simple vet clinic app — as the workload. The focus is on deploying a real Java app on a local Minikube cluster.
+A hands-on Kubernetes learning project using Spring PetClinic — a simple vet clinic app — as the workload. The focus is on deploying a real Java app on a local Minikube cluster with two nodes.
 
-**Stack:** Spring Boot 4 · Java 17 · MySQL · Minikube
+**Stack:** Spring Boot 4 · Java 17 · MySQL · Minikube (2 nodes)
 
 ---
 
@@ -17,15 +17,22 @@ A hands-on Kubernetes learning project using Spring PetClinic — a simple vet c
   Namespace: pet-clinic-app
   ┌─────────────────────────┐
   │  HPA (1–3 pods, 50% CPU)│
-  │  Deployment: java-app   │
+  │  Deployment: java-app   │   → scheduled on any available node
   │  Service: NodePort 32000│
   └────────────┬────────────┘
                │ jdbc (cross-namespace DNS)
   Namespace: pet-clinic-db
   ┌─────────────────────────┐
-  │  StatefulSet: mysql     │
+  │  StatefulSet: mysql     │   → pinned to minikube-m02 (Node Affinity)
   │  Service: NodePort 30244│
   └─────────────────────────┘
+```
+
+### Cluster Nodes
+
+```
+minikube       → control-plane  (runs ingress controller, cluster components)
+minikube-m02   → worker         (MySQL is pinned here via Node Affinity)
 ```
 
 | Resource | What it does |
@@ -42,6 +49,7 @@ A hands-on Kubernetes learning project using Spring PetClinic — a simple vet c
 | NetworkPolicy | Restricts MySQL access to only pods from `pet-clinic-app` namespace |
 | LimitRange | Sets default/min/max CPU & memory per container in a namespace |
 | ResourceQuota | Caps total CPU, memory, and object count for the whole namespace |
+| Node Affinity | Forces MySQL pod to always run on the worker node (`minikube-m02`) |
 
 ---
 
@@ -71,9 +79,21 @@ kubectl apply -f kube-configs/java-app/java.yml
 ## Prerequisites
 
 ```bash
-minikube start
+# Start Minikube with 2 nodes and Calico CNI
+minikube start --nodes 2 --cni calico --driver kvm2
+
+# Enable required addons (must re-run after every minikube delete)
 minikube addons enable ingress
 minikube addons enable metrics-server
+```
+
+Verify both nodes are Ready before deploying:
+
+```bash
+kubectl get nodes
+# NAME           STATUS   ROLES           AGE
+# minikube       Ready    control-plane
+# minikube-m02   Ready    worker
 ```
 
 ---
@@ -85,13 +105,17 @@ minikube addons enable metrics-server
 kubectl create namespace pet-clinic-app
 kubectl create namespace pet-clinic-db
 
+# Label namespaces (required for NetworkPolicy)
+kubectl label namespace pet-clinic-app name=pet-clinic-app
+kubectl label namespace pet-clinic-db name=pet-clinic-db
+
 # Secrets & ConfigMaps
 kubectl apply -f kube-configs/secret.yml
 kubectl apply -f kube-configs/secret-db.yml
 kubectl apply -f kube-configs/mysql/configmap.yml
 kubectl apply -f kube-configs/java-app/configmap.yml
 
-# Workloads
+# Workloads — wait for MySQL before starting the app
 kubectl apply -f kube-configs/mysql/mysql.yml
 kubectl rollout status statefulset/mysql -n pet-clinic-db
 kubectl apply -f kube-configs/java-app/java.yml
@@ -101,6 +125,9 @@ kubectl apply -f kube-configs/java-app/hpa.yml
 # Resource Management (LimitRange + ResourceQuota)
 kubectl apply -f kube-configs/java-app/resource-management.yml
 kubectl apply -f kube-configs/mysql/resource-management.yml
+
+# NetworkPolicy
+kubectl apply -f kube-configs/mysql/network-policy.yml
 ```
 
 ---
@@ -108,11 +135,40 @@ kubectl apply -f kube-configs/mysql/resource-management.yml
 ## Access
 
 ```bash
-# Add to /etc/hosts
+# Add to /etc/hosts (run this after every minikube delete — the IP changes)
+sudo sed -i "s/.*petclinic.local/$(minikube ip) petclinic.local/" /etc/hosts
+# or first time:
 echo "$(minikube ip) petclinic.local" | sudo tee -a /etc/hosts
 ```
 
 Then open `http://petclinic.local` or `http://$(minikube ip):32000`
+
+---
+
+## Node Affinity
+
+MySQL is pinned to the worker node (`minikube-m02`) using Node Affinity. This ensures the DB always runs on a dedicated node, separate from the app.
+
+The affinity block in `kube-configs/mysql/mysql.yml`:
+
+```yaml
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - minikube-m02
+```
+
+Verify MySQL is on the worker node:
+
+```bash
+kubectl get pods -o wide -n pet-clinic-db
+# mysql-0 should show NODE = minikube-m02
+```
 
 ---
 
@@ -172,4 +228,3 @@ kubectl run test-pod --image=nginx -n pet-clinic-app
 kubectl get pod test-pod -n pet-clinic-app -o jsonpath='{.spec.containers[0].resources}'
 kubectl delete pod test-pod -n pet-clinic-app
 ```
-

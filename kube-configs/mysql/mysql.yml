@@ -14,6 +14,16 @@ spec:
       labels:
         app: mysql
     spec:
+#Affinity block can be deleted it is an example to force pod running on specific node
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - minikube-m02
       containers:
       - name: mysql
         image: mysql:latest
