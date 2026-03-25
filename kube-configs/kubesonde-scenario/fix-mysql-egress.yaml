@@ -1,0 +1,44 @@
+# =============================================================================
+# EXPERIMENT: Fix the MySQL egress gap
+# =============================================================================
+# After kubesonde shows that mysql can reach the internet (egress unrestricted),
+# apply this policy to lock down egress from the database namespace.
+#
+# This adds an Egress NetworkPolicy to mysql that:
+#   - Only allows outbound connections TO pet-clinic-app namespace on port 3306
+#     (not actually needed, mysql doesn't initiate, but shows the pattern)
+#   - Only allows DNS resolution (UDP 53 to kube-dns)
+#   - Blocks everything else outbound
+#
+# After applying, delete the kubesonde CR and recreate it (or wait 20 seconds
+# for the recursive probing loop to re-run). The mysql → internet probes
+# should now show resultingAction: Deny.
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mysql-deny-egress
+  namespace: pet-clinic-db
+spec:
+  podSelector:
+    matchLabels:
+      app: mysql
+  policyTypes:
+  - Egress
+  egress:
+  # Allow DNS resolution only (required for K8s service discovery)
+  - ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow mysql to respond to connections from pet-clinic-app
+  # (technically mysql only needs ingress for this, but some CNIs require
+  # matching egress rules for established connections)
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: pet-clinic-app
+    ports:
+    - protocol: TCP
+      port: 3306

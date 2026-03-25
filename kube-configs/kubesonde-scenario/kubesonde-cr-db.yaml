@@ -1,0 +1,38 @@
+# =============================================================================
+# KUBESONDE CR — pet-clinic-db namespace
+# =============================================================================
+# This triggers kubesonde to probe ALL pods inside pet-clinic-db:
+#   - mysql pod (StatefulSet)
+#   - db-admin pod (the extra one we added)
+#
+# Security questions this CR answers:
+#
+#   1. THE BIG ONE — Can mysql reach the internet?
+#      The existing NetworkPolicy only covers INGRESS to mysql (who can connect
+#      IN to port 3306). It says NOTHING about egress FROM mysql.
+#      A compromised MySQL could exfiltrate data over TCP 80/443.
+#      kubesonde will show: mysql → google.com:80 = Allow  (expected: Deny)
+#      This is a real security gap.
+#
+#   2. Can db-admin reach mysql (port 3306)?
+#      The NetworkPolicy only allows ingress from namespace labeled
+#      "name=pet-clinic-app". db-admin lives in pet-clinic-db (labeled
+#      "name=pet-clinic-db"), so it should be BLOCKED.
+#      kubesonde will confirm whether the policy actually works.
+#
+#   3. Can db-admin reach the internet?
+#      No egress policy exists on db-admin either.
+# =============================================================================
+apiVersion: security.kubesonde.io/v1
+kind: Kubesonde
+metadata:
+  name: scan-pet-clinic-db
+  namespace: kubesonde-system
+  labels:
+    app.kubernetes.io/name: kubesonde
+spec:
+  namespace: pet-clinic-db
+  probe: all
+  # No include entries here on purpose.
+  # We expect the database namespace to be FULLY isolated.
+  # Any probe that results in "Allow" is a finding.

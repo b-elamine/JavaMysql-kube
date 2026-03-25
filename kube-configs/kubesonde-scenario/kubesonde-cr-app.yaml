@@ -1,0 +1,43 @@
+# =============================================================================
+# KUBESONDE CR — pet-clinic-app namespace
+# =============================================================================
+# This triggers kubesonde to probe ALL pods inside pet-clinic-app:
+#   - java-app pod
+#   - monitoring-probe pod (the extra one we added)
+#
+# probe: all  →  kubesonde probes every src→dst pair it discovers.
+#               The DEFAULT expected outcome for every probe is "Deny".
+#               Any probe that resolves to "Allow" when expected "Deny"
+#               is a security finding.
+#
+# include     →  override specific probes to mark them as EXPECTED Allow.
+#               We mark java-app's internet egress on 443 as acceptable
+#               (the app needs HTTPS for things like DB driver downloads).
+#               Everything NOT in include remains expected=Deny.
+#
+# Security questions this CR answers:
+#   1. Can monitoring-probe reach java-app on port 8080? (no policy blocks it)
+#   2. Can java-app reach the internet? (egress is unrestricted)
+#   3. Can any pod reach DNS (UDP 53)?
+# =============================================================================
+apiVersion: security.kubesonde.io/v1
+kind: Kubesonde
+metadata:
+  name: scan-pet-clinic-app
+  namespace: kubesonde-system
+  labels:
+    app.kubernetes.io/name: kubesonde
+spec:
+  namespace: pet-clinic-app
+  probe: all
+  include:
+    # java-app legitimately needs outbound HTTPS (e.g. actuator, external APIs)
+    # Mark these as expected=Allow so they don't appear as false-positive findings
+    - fromPodSelector: "java-app"
+      port: "443"
+      protocol: TCP
+      expected: Allow
+    - fromPodSelector: "java-app"
+      port: "53"
+      protocol: UDP
+      expected: Allow

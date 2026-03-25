@@ -1,0 +1,66 @@
+# =============================================================================
+# KUBESONDE SCENARIO - EXTRA WORKLOADS
+# =============================================================================
+# These pods are NOT part of the PetClinic application.
+# They are added deliberately to create interesting security scenarios
+# for kubesonde to detect:
+#
+#   monitoring-probe (pet-clinic-app):
+#     Simulates a monitoring/sidecar agent that lives in the app namespace.
+#     With no NetworkPolicy restricting lateral movement inside pet-clinic-app,
+#     this pod can freely probe java-app on port 8080.
+#     Security question: should a monitoring tool be able to reach the app?
+#
+#   db-admin (pet-clinic-db):
+#     Simulates a database admin tool (e.g., phpMyAdmin) in the DB namespace.
+#     The existing MySQL NetworkPolicy restricts ingress to pods from
+#     pet-clinic-app namespace only — so this pod in pet-clinic-db is blocked
+#     from reaching MySQL even though it's in the same namespace.
+#     Security question: can a "trusted" DB-side tool actually reach the DB?
+# =============================================================================
+
+---
+# Monitoring probe pod — lives in the application namespace
+apiVersion: v1
+kind: Pod
+metadata:
+  name: monitoring-probe
+  namespace: pet-clinic-app
+  labels:
+    app: monitoring-probe
+    role: monitoring
+spec:
+  containers:
+  - name: probe
+    image: busybox:1.36
+    command: ["sleep", "infinity"]
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        cpu: 50m
+        memory: 64Mi
+
+---
+# DB-admin pod — lives in the database namespace
+apiVersion: v1
+kind: Pod
+metadata:
+  name: db-admin
+  namespace: pet-clinic-db
+  labels:
+    app: db-admin
+    role: admin
+spec:
+  containers:
+  - name: admin
+    image: busybox:1.36
+    command: ["sleep", "infinity"]
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        cpu: 50m
+        memory: 64Mi
