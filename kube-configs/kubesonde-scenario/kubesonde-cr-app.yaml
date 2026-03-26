@@ -33,11 +33,11 @@ spec:
   include:
     # java-app legitimately needs outbound HTTPS (e.g. actuator, external APIs)
     # Mark these as expected=Allow so they don't appear as false-positive findings
-    - fromPodSelector: "java-app"
+    - fromPodSelector: "app=java-app"
       port: "443"
       protocol: TCP
       expected: Allow
-    - fromPodSelector: "java-app"
+    - fromPodSelector: "app=java-app"
       port: "53"
       protocol: UDP
       expected: Allow
